@@ -29,9 +29,10 @@ blockraiders chart delete --name <chart-name>
 `
 
 type chartOp struct {
-	Cfg     *templates.ConfigDto
-	Command *cobra.Command
-	Args    []*string
+	Cfg      *templates.ConfigDto
+	Command  *cobra.Command
+	Args     []*string
+	TypeName *string
 }
 
 func NewChartCmd() *cobra.Command {
@@ -150,8 +151,9 @@ func (op *chartOp) doUpdateChart() error {
 		return err
 	}
 
+	op.TypeName = &actions.Client.ChartAct.ReInstall
 	if len(actions.Client.ChartAct.ReInstall) != 0 {
-		switch actions.Client.ChartAct.ReInstall {
+		switch *op.TypeName {
 		case "api":
 			err = ch.UninstallByIndex(index)
 			if err != nil {
@@ -228,7 +230,7 @@ func (op *chartOp) doApplyChart() error {
 		return err
 	}
 
-	typeName := *op.Args[1]
+	op.TypeName = op.Args[1]
 	version := *op.Args[2]
 
 	var name string
@@ -236,19 +238,19 @@ func (op *chartOp) doApplyChart() error {
 	if len(actions.Client.ChartAct.Name) > 0 {
 		name = actions.Client.ChartAct.Name
 	} else {
-		name, err = op.genName(version, typeName)
+		name, err = op.genName(version, *op.TypeName)
 		if err != nil {
 			return err
 		}
 	}
 
-	switch typeName {
+	switch *op.TypeName {
 	case "api":
 		return op.applyApi(name, version)
 	case "host":
 		return op.applyHost(name, version)
 	default:
-		return fmt.Errorf("doesn't insluce type name %s", typeName)
+		return fmt.Errorf("doesn't insluce type name %s", *op.TypeName)
 	}
 }
 
@@ -350,7 +352,7 @@ func (op *chartOp) applyHost(name string, version string) error {
 
 	fmt.Println("start deploy chart...")
 	return ch.Install(path, name, version, func(values *templates.GameHostValuesDto) {
-		values.Image.Repository = op.Cfg.ChartInfo.GetCurrentChart().ApiRepository
+		values.Image.Repository = op.Cfg.ChartInfo.GetCurrentChart().GameHostRepository
 		values.Body.Namespace = op.Cfg.ChartInfo.GetCurrentChart().Namespace
 		values.Body.Name = name
 		values.Config.Data.Appsettings = app
@@ -376,9 +378,17 @@ func (op *chartOp) build(path string, version string) error {
 	if err != nil {
 		return err
 	}
-	tag := op.Cfg.ChartInfo.GetCurrentChart().ApiRepository + ":" + version
+
+	var tag string
+	if *op.TypeName == "api" {
+		tag = op.Cfg.ChartInfo.GetCurrentChart().ApiRepository
+	} else {
+		tag = op.Cfg.ChartInfo.GetCurrentChart().GameHostRepository
+	}
+	tag = tag + ":" + version
 
 	dockerFilePath := filepath.Join(path, actions.Client.ChartAct.DockerImage)
+	fmt.Printf("Build DockerFile:%s", dockerFilePath)
 	if err = host.Build(dockerFilePath, tag, nil); err != nil {
 		return err
 	}
